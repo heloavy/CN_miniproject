@@ -32,16 +32,8 @@ async def iperf_endpoint(request: IperfRequest, db: Session = Depends(get_db)):
         db.add(db_result)
         db.commit()
 
-        # Return response
-        return IperfResponse(
-            ts=db_result.timestamp,
-            server=request.server,
-            protocol=request.protocol,
-            duration_s=request.duration,
-            bandwidth_mbps=parsed_metrics["bandwidth_mbps"],
-            jitter_ms=parsed_metrics["jitter_ms"],
-            loss_pct=parsed_metrics["packet_loss"]
-        )
+        # Return response with intervals
+        return parsed_metrics.get("intervals", [])
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

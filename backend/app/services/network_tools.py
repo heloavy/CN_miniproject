@@ -67,6 +67,7 @@ class NetworkTools:
             else:
                 cmd = ["iperf3", "-c", server, "-t", str(duration), "-J"]
 
+            print(f"Running iperf3 command: {' '.join(cmd)}")  # Log the command
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -75,6 +76,10 @@ class NetworkTools:
             )
 
             stdout, stderr = await process.communicate()
+
+            print(f"iperf3 return code: {process.returncode}")
+            print(f"iperf3 stdout: {stdout}")
+            print(f"iperf3 stderr: {stderr}")
 
             if process.returncode == 0:
                 return stdout
@@ -162,31 +167,51 @@ def parse_traceroute_output(raw_output: str) -> List[Dict]:
     return hops
 
 def parse_iperf_output(raw_json: str) -> Dict:
-    """Parse iperf3 JSON output."""
+    """Parse iperf3 JSON output and return intervals with calculated totals."""
     try:
         data = json.loads(raw_json)
 
-        # Extract bandwidth
-        bandwidth_bps = data.get("end", {}).get("sum_sent", {}).get("bits_per_second", 0)
-        bandwidth_mbps = bandwidth_bps / (1000 * 1000)
+        # Extract intervals
+        intervals = data.get("intervals", [])
+        parsed_intervals = []
+        total_transfer = 0
+        total_bandwidth = 0
 
-        # Extract jitter
-        jitter_ms = data.get("end", {}).get("sum_sent", {}).get("jitter_ms", 0)
+        for interval in intervals:
+            streams = interval.get("streams", [])
+            for stream in streams:
+                transfer_mbytes = stream.get("bytes", 0) / (1000 * 1000)  # Convert to MBytes
+                bitrate_mbps = stream.get("bits_per_second", 0) / (1000 * 1000)  # Convert to Mbps
+                parsed_intervals.append({
+                    "interval": stream.get("time", 0),
+                    "transfer": transfer_mbytes,
+                    "bitrate": bitrate_mbps
+                })
+                total_transfer += transfer_mbytes
+                total_bandwidth += bitrate_mbps
 
-        # Extract packet loss
-        packet_loss = data.get("end", {}).get("sum_sent", {}).get("lost_percent", 0)
+        # Calculate overall metrics
+        num_intervals = len(parsed_intervals)
+        avg_bandwidth_mbps = total_bandwidth / num_intervals if num_intervals > 0 else 0
+
+        # Extract other metrics from end summary if available
+        jitter_ms = data.get("end", {}).get("sum", {}).get("jitter_ms", 0)
+        packet_loss = data.get("end", {}).get("sum", {}).get("lost_percent", 0)
 
         return {
-            "bandwidth_mbps": bandwidth_mbps,
+            "intervals": parsed_intervals,
+            "bandwidth_mbps": avg_bandwidth_mbps,
             "jitter_ms": jitter_ms,
             "packet_loss": packet_loss,
+            "total_transfer": total_transfer,
             "protocol": data.get("start", {}).get("test_start", {}).get("protocol", "TCP")
         }
 
     except json.JSONDecodeError:
         return {
-            "error": "Failed to parse iperf JSON output",
+            "intervals": [],
             "bandwidth_mbps": 0,
             "jitter_ms": 0,
-            "packet_loss": 0
+            "packet_loss": 0,
+            "total_transfer": 0
         }
